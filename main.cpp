@@ -1,9 +1,25 @@
 #include "mbed.h"
 #include "EthernetInterface.h"
 
-#define COLUMNS 32
+#define COMPILE_ASSERT(x) extern int _compile_assert_fail[-((x) == 0)];
+
+#define COLUMNS (32 * 8)
+#define NUM_SUBFRAMES 8
+#define FRAME_SIZE (COLUMNS * NUM_SUBFRAMES * 8)
+#define NUM_FRAMES 2
 #define SPEED 1
 #define BASE 8
+
+uint8_t framebuffer[FRAME_SIZE * NUM_FRAMES];
+static uint8_t *write_framebuffer = &framebuffer[0];
+static const uint8_t * volatile read_framebuffer = &framebuffer[0];
+
+#define FRAGMENT_SIZE 512
+#define MAX_PACKET_SIZE (FRAGMENT_SIZE + 4)
+uint8_t packet_buffer[MAX_PACKET_SIZE];
+#define NUM_FRAGMENTS (FRAME_SIZE / FRAGMENT_SIZE)
+
+COMPILE_ASSERT((FRAME_SIZE % FRAGMENT_SIZE) == 0)
 
 Serial pc(USBTX, USBRX);
 
@@ -74,50 +90,126 @@ setup_dma(void)
   DMA_TCD0_DOFF = 0;
   DMA_TCD0_CITER_ELINKNO = 1;
   DMA_TCD0_DLASTSGA = 0;
-  DMA_TCD0_CSR = 0; //DMA_CSR_INTMAJOR_MASK;
+  DMA_TCD0_CSR = DMA_CSR_INTMAJOR_MASK;
   DMA_TCD0_BITER_ELINKNO = 1;
+
+  NVIC_EnableIRQ(DMA0_IRQn);
 }
 
-uint8_t framebuffer[COLUMNS * 8];
-
 static void
-trigger_dma(uint32_t src)
+trigger_dma(const void *src)
 {
-  DMA_TCD0_SADDR = src;
+  DMA_TCD0_SADDR = (uint32_t)src;
   DMA_SSRT = 0;
 }
 
 EthernetInterface eth;
 
-#define PACKET_SIZE (COLUMNS * 8)
-uint8_t packet_buffer[PACKET_SIZE];
+class NetRec {
+  public:
+    NetRec() {};
+    void run();
+  private:
+    UDPSocket s;
+    Endpoint client;
+    uint8_t current_frame;
+    uint32_t frame_mask;
+
+    void send_frame_status();
+};
+
+void
+NetRec::send_frame_status()
+{
+  packet_buffer[0] = 4; /* Frame ACK */
+  packet_buffer[1] = current_frame;
+  packet_buffer[2] = 0;
+  packet_buffer[3] = 0;
+
+  packet_buffer[4] = frame_mask & 0xff;
+  packet_buffer[5] = (frame_mask >> 8) & 0xff;
+  packet_buffer[6] = (frame_mask >> 16) & 0xff;
+  packet_buffer[7] = (frame_mask >> 24) & 0xff;
+  s.sendTo(client, (char *)packet_buffer, 8);
+#if 0
+  if (packet_buffer[1] == current_frame) {
+      current_frame++;
+      if (current_frame & 1) {
+	  read_framebuffer = &framebuffer[0];
+	  write_framebuffer = &framebuffer[FRAME_SIZE];
+      } else {
+	  read_framebuffer = &framebuffer[FRAME_SIZE];
+	  write_framebuffer = &framebuffer[0];
+      }
+      frame_mask = 0;
+  }
+#endif
+}
 
 static void
 ethernet_thread(const void *arg)
 {
-  UDPSocket s;
-  Endpoint client;
+  NetRec netobj;
+
+  netobj.run();
+}
+
+void
+NetRec::run()
+{
   int n;
+  uint8_t cmd;
+  uint8_t frame_num;
+  uint8_t *dest;
+  uint8_t fragment;
 
   eth.init();
   eth.connect();
   s.bind(3001);
+  current_frame = 0;
+  frame_mask = 0;
 
   while(1) {
+      myled = 1;
       n = s.receiveFrom(client, (char *)packet_buffer, sizeof(packet_buffer));
-      if (n == PACKET_SIZE) {
-	  memcpy(framebuffer, packet_buffer, n);
+      myled = 0;
+      if (n < 4)
+	  continue;
+      cmd = packet_buffer[0];
+      frame_num = packet_buffer[1];
+      switch (cmd) {
+      case 0: /* Frame data */
+	  //if (frame_num != current_frame)
+	  //    break;
+	  if (n != FRAGMENT_SIZE + 4)
+	      break;
+	  fragment = packet_buffer[2];
+	  frame_mask |= 1u << fragment;
+	  if (fragment < NUM_FRAGMENTS) {
+	      dest = &write_framebuffer[fragment * FRAGMENT_SIZE];
+	      memcpy(dest, packet_buffer + 4, FRAGMENT_SIZE);
+	  }
+	  send_frame_status();
+	  break;
+      case 1: /* EOF */
+	  if (n != 4)
+	      break;
+	  frame_mask = 0;
+	  send_frame_status();
+	  break;
+      case 2: /* Query */
+	  frame_mask = 0;
+	  send_frame_status();
+	  break;
       }
   }
 }
 
-#if 0
 static void scan_tick(void);
 Timeout scan_timeout;
 
 static bool output_active;
 static bool dma_active;
-static const uint8_t *read_framebuffer;
 
 #define BASE_SCAN_US 4
 
@@ -136,7 +228,7 @@ maybe_rearm(void)
   if (current_subframe == 0) {
       select_row(current_row);
   }
-  scan_timeout.attach(scan_tick, BASE_SCAN_US << current_subframe);
+  scan_timeout.attach_us(scan_tick, BASE_SCAN_US << current_subframe);
   lat = 0;
   if (ptr) {
       oe = 0;
@@ -157,6 +249,14 @@ maybe_rearm(void)
   }
 }
 
+extern "C" void
+DMA0_IRQHandler(void)
+{
+  dma_active = false;
+  DMA_CINT = 0;
+  maybe_rearm();
+}
+
 static void
 scan_tick(void)
 {
@@ -164,32 +264,8 @@ scan_tick(void)
   output_active = false;
   maybe_rearm();
 }
-#endif
 
-int main()
-{
-  Thread thread(ethernet_thread);
-  int i;
-  int row;
-  int x;
-  int match1;
-  int match2;
-  uint8_t *p;
-  int next_tick;
-  int now;
-
-  green_led = 1;
-  setup_flexbus();
-  setup_dma();
-  oe = 1;
-  lat = 0;
-  x = 0;
-  myled = 1;
-
-  row = 0;
-  t.start();
-  next_tick = 0;
-  while(1) {
+#if 0
       p = &framebuffer[COLUMNS * row];
       match1 = (x / ((row + BASE) * SPEED)) % COLUMNS;
       match2 = (x / ((row + BASE + 8) * SPEED)) % COLUMNS;
@@ -202,22 +278,32 @@ int main()
 	    val |= 0xc0;
 	  p[i] = val;
       }
-      myled = 1;
-      trigger_dma((uint32_t)p);
-      now = t.read_us();
-      if (now < next_tick)
-	wait_us(next_tick - now);
-      next_tick += 1000;
-      myled = 0;
-      oe = 1;
-      lat = 1;
-      select_row(row);
-      lat = 0;
-      oe = 0;
-      row++;
-      if (row == 8) {
-	  row = 0;
-	  x++;
-      }
-  }
+#endif
+
+int main()
+{
+  Thread thread(ethernet_thread);
+
+{ int i;
+for (i = 0; i < NUM_SUBFRAMES; i++) {
+  //framebuffer[COLUMNS * NUM_SUBFRAMES] = 0xc1;
+  framebuffer[1 + COLUMNS*0] = 0x01;
+  framebuffer[2 + COLUMNS*1] = 0x01;
+  framebuffer[3 + COLUMNS*2] = 0x01;
+  framebuffer[4 + COLUMNS*3] = 0x01;
+  framebuffer[5 + COLUMNS*4] = 0x01;
+  framebuffer[6 + COLUMNS*5] = 0x01;
+  framebuffer[7 + COLUMNS*6] = 0x01;
+  framebuffer[8 + COLUMNS*7] = 0x01;
+}
+}
+  green_led = 1;
+  setup_flexbus();
+  setup_dma();
+  oe = 1;
+  lat = 0;
+  myled = 1;
+
+  maybe_rearm();
+  Thread::wait(osWaitForever);
 }
