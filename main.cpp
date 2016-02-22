@@ -14,7 +14,7 @@
 
 uint8_t framebuffer[FRAME_SIZE * NUM_FRAMES];
 static uint8_t *write_framebuffer = &framebuffer[0];
-static const uint8_t * volatile read_framebuffer = &framebuffer[0];
+static const uint8_t * volatile read_framebuffer = NULL;
 
 #define FRAGMENT_SIZE 512
 #define MAX_PACKET_SIZE (FRAGMENT_SIZE + 4)
@@ -120,6 +120,7 @@ class NetRec {
     uint32_t frame_mask;
 
     void send_frame_status();
+    void flip();
 };
 
 void
@@ -135,19 +136,23 @@ NetRec::send_frame_status()
   packet_buffer[6] = (frame_mask >> 16) & 0xff;
   packet_buffer[7] = (frame_mask >> 24) & 0xff;
   s.sendTo(client, (char *)packet_buffer, 8);
-#if 0
-  if (packet_buffer[1] == current_frame) {
-      current_frame++;
-      if (current_frame & 1) {
-	  read_framebuffer = &framebuffer[0];
-	  write_framebuffer = &framebuffer[FRAME_SIZE];
-      } else {
-	  read_framebuffer = &framebuffer[FRAME_SIZE];
-	  write_framebuffer = &framebuffer[0];
-      }
-      frame_mask = 0;
+}
+
+
+void
+NetRec::flip()
+{
+  current_frame++;
+  if (current_frame & 1) {
+      read_framebuffer = &framebuffer[0];
+      write_framebuffer = &framebuffer[FRAME_SIZE];
+  } else {
+      read_framebuffer = &framebuffer[FRAME_SIZE];
+      write_framebuffer = &framebuffer[0];
   }
-#endif
+  frame_mask = 0;
+  while (read_framebuffer)
+      Thread::wait(1);
 }
 
 static void
@@ -234,6 +239,7 @@ NetRec::run()
 	      break;
 	  frame_mask = 0;
 	  send_frame_status();
+	  flip();
 	  break;
       case 2: /* Query */
 	  frame_mask = 0;
@@ -267,6 +273,7 @@ maybe_rearm(void)
   static int current_row;
   static int current_subframe;
   static const uint8_t *ptr;
+  static const uint8_t *base;
 
   if (output_active || dma_active)
     return;
@@ -287,7 +294,11 @@ maybe_rearm(void)
       current_row++;
       if (current_row == 8) {
 	  current_row = 0;
-	  ptr = read_framebuffer;
+	  if (read_framebuffer) {
+	      base = read_framebuffer;
+	      read_framebuffer = NULL;
+	  }
+	  ptr = base;
       }
   }
   if (ptr) {
