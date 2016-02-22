@@ -24,35 +24,22 @@ class MatrixScreen():
         self._socket = socket.socket(type=socket.SOCK_DGRAM)
         self._frame_num = 0
 
-    def _swizzle(self):
-        dest = 0
-        bitbuffer = self._bitbuffer
-        for row in range(ROWS):
-            base = row * COLUMNS * SUBFIELDS
-            for column in range(COLUMNS):
-                x = column & 63
-                y = ((column >> 6) << 3) + row
-                color1 = self.screen[x][y]
-                color2 = self.screen[x][y + 8]
-                for n in range(SUBFIELDS):
-                    bits = (color1 & 1) | ((color1 & 0x100) >> 7) | ((color1 & 0x10000) >> 13)
-                    bits |= ((color2 & 1) << 4) | ((color2 & 0x100) >> 2) | ((color2 & 0x10000) >> 9)
-                    bitbuffer[base + column + n * COLUMNS] = bits
-                    color1 >>= 1
-                    color2 >>= 1
-
     def send(self):
         dest = (TARGET_IP, TARGET_PORT)
-        self._swizzle()
-        for n in range(len(self._bitbuffer) // FRAGMENT_SIZE):
-            start = n * FRAGMENT_SIZE;
-            header = bytes([0, self._frame_num, n, 0])
-            buf = header + self._bitbuffer[start:start + FRAGMENT_SIZE];
+        n = 0
+        for y0 in range(0, 8):
+          for y1 in range(4):
+            y = y0 + y1 * 16
+            header = bytes([3, self._frame_num, n, 0])
+            buf = header + bytes(self.screen[:, y]) + bytes(self.screen[:, y + 8])
             self._socket.sendto(buf, dest);
             self._socket.recv(8)
+            n += 1
         self._socket.sendto(bytes([1, self._frame_num, 0, 0]), dest)
         self._socket.recv(8)
         self._frame_num += 1
+        if self._frame_num == 256:
+            self._frame_num = 0
 
 def pos_modf(val):
     val = math.modf(val)[0]
@@ -80,7 +67,7 @@ def color_plasma(val):
     return r | (g << 8) | (b << 16)
 
 offset = 0.0
-DT = 0.1
+DT = 1/30
 
 def tick(screen):
     global offset
@@ -99,14 +86,18 @@ def main():
     next_tick = time.time()
     frames = 0
     m = MatrixScreen()
-    while True:
-        now = time.time()
-        if now > next_tick:
-            print(frames)
-            frames = 0
-            next_tick += 1.0
-        frames += 1
-        tick(m.screen)
+    try:
+        while True:
+            now = time.time()
+            if now > next_tick:
+                print(frames)
+                frames = 0
+                next_tick += 1.0
+            frames += 1
+            tick(m.screen)
+            m.send()
+    except:
+        m.screen[:] = 0
         m.send()
 
 if __name__ == "__main__":

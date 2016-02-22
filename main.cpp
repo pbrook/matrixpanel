@@ -5,7 +5,9 @@
 
 #define COLUMNS (32 * 8)
 #define NUM_SUBFRAMES 8
-#define FRAME_SIZE (COLUMNS * NUM_SUBFRAMES * 8)
+#define ROW_SIZE (COLUMNS * NUM_SUBFRAMES)
+#define ROWS 8
+#define FRAME_SIZE (ROW_SIZE * ROWS)
 #define NUM_FRAMES 2
 #define SPEED 1
 #define BASE 8
@@ -20,6 +22,8 @@ uint8_t packet_buffer[MAX_PACKET_SIZE];
 #define NUM_FRAGMENTS (FRAME_SIZE / FRAGMENT_SIZE)
 
 COMPILE_ASSERT((FRAME_SIZE % FRAGMENT_SIZE) == 0)
+#define FRAGMENTS_PER_ROW (NUM_FRAGMENTS / ROWS)
+COMPILE_ASSERT((NUM_FRAGMENTS % ROWS) == 0)
 
 Serial pc(USBTX, USBRX);
 
@@ -154,6 +158,40 @@ ethernet_thread(const void *arg)
   netobj.run();
 }
 
+static void
+decode_pixels(int fragment, uint8_t *pixels)
+{
+  uint32_t *src = (uint32_t *)pixels;
+  uint32_t color1;
+  uint32_t color2;
+  uint8_t *base;
+  uint8_t *dest;
+  uint8_t bits;
+  int partial;
+  int row;
+  int x;
+  int n;
+
+  partial = fragment % FRAGMENTS_PER_ROW;
+  row = fragment / FRAGMENTS_PER_ROW;
+  base = &write_framebuffer[partial * (FRAGMENT_SIZE / 8) + row * ROW_SIZE];
+  for (x = 0; x < FRAGMENT_SIZE / 8; x++) {
+      color1 = src[0];
+      color2 = src[FRAGMENT_SIZE / 8];
+      src++;
+      dest = base;
+      for (n = 0; n < NUM_SUBFRAMES; n++) {
+	  bits = (color1 & 1) | ((color1 & 0x100) >> 7) | ((color1 & 0x10000) >> 13);
+	  bits |= ((color2 & 1) << 4) | ((color2 & 0x100) >> 2) | ((color2 & 0x10000) >> 9);
+	  *dest = bits;
+	  dest += COLUMNS;
+	  color1 >>= 1;
+	  color2 >>= 1;
+      }
+      base++;
+  }
+}
+
 void
 NetRec::run()
 {
@@ -185,11 +223,11 @@ NetRec::run()
 	      break;
 	  fragment = packet_buffer[2];
 	  frame_mask |= 1u << fragment;
+	  send_frame_status();
 	  if (fragment < NUM_FRAGMENTS) {
 	      dest = &write_framebuffer[fragment * FRAGMENT_SIZE];
 	      memcpy(dest, packet_buffer + 4, FRAGMENT_SIZE);
 	  }
-	  send_frame_status();
 	  break;
       case 1: /* EOF */
 	  if (n != 4)
@@ -200,6 +238,16 @@ NetRec::run()
       case 2: /* Query */
 	  frame_mask = 0;
 	  send_frame_status();
+	  break;
+      case 3: /* Pixel Data */
+	  if (n != FRAGMENT_SIZE + 4)
+	      break;
+	  fragment = packet_buffer[2];
+	  frame_mask |= 1u << fragment;
+	  send_frame_status();
+	  if (fragment < NUM_FRAGMENTS) {
+	      decode_pixels(fragment, &packet_buffer[4]);
+	  }
 	  break;
       }
   }
