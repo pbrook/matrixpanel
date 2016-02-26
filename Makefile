@@ -122,5 +122,5 @@ DEPS = $(OBJECTS:.o=.d)
 -include $(DEPS)
 
 install: $(PROJECT).bin
-	cp $(PROJECT).bin ~/hs/kl26/$(PROJECT)-K64F.bin
+	cp $(PROJECT).bin /mnt/mbed
 

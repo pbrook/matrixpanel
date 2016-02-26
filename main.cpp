@@ -17,7 +17,7 @@ static uint8_t *write_framebuffer = &framebuffer[0];
 static const uint8_t * volatile read_framebuffer = NULL;
 
 #define FRAGMENT_SIZE 512
-#define MAX_PACKET_SIZE (FRAGMENT_SIZE + 4)
+#define MAX_PACKET_SIZE (FRAGMENT_SIZE + 8)
 uint8_t packet_buffer[MAX_PACKET_SIZE];
 #define NUM_FRAGMENTS (FRAME_SIZE / FRAGMENT_SIZE)
 
@@ -246,13 +246,13 @@ NetRec::run()
 	  send_frame_status();
 	  break;
       case 3: /* Pixel Data */
-	  if (n != FRAGMENT_SIZE + 4)
+	  if (n != FRAGMENT_SIZE + 8)
 	      break;
 	  fragment = packet_buffer[2];
 	  frame_mask |= 1u << fragment;
 	  send_frame_status();
 	  if (fragment < NUM_FRAGMENTS) {
-	      decode_pixels(fragment, &packet_buffer[4]);
+	      decode_pixels(fragment, &packet_buffer[8]);
 	  }
 	  break;
       }
@@ -265,7 +265,7 @@ Timeout scan_timeout;
 static bool output_active;
 static bool dma_active;
 
-#define BASE_SCAN_US 4
+#define BASE_SCAN_US 2
 
 static void
 maybe_rearm(void)

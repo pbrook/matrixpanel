@@ -1,7 +1,7 @@
 import socket
 import numpy as np
 
-TARGET_IP = "192.168.11.2"
+TARGET_IP = "matrix"
 TARGET_PORT = 3001
 
 class MatrixScreen():
@@ -24,7 +24,7 @@ class MatrixScreen():
         for y0 in range(0, self.ROWS):
             for y1 in range(self.FRAGMENTS_PER_ROW):
                 y = y0 + y1 * self.ROWS * 2
-                header = bytes([3, self._frame_num, n, 0])
+                header = bytes([3, self._frame_num, n, 0, 0, 0, 0, 0])
                 buf = header + bytes(self.screen[:, y]) + bytes(self.screen[:, y + self.ROWS])
                 self._socket.sendto(buf, dest);
                 self._socket.recv(8)

@@ -36,7 +36,7 @@ DT = 1/30
 def draw(screen):
     global offset
     sz = 64
-    scale = 1.5 * math.pi * 2.0 / float(sz)
+    scale = 2.0 * math.pi * 2.0 / float(sz)
     for y in range(0, sz):
         for x in range(0, sz):
             u = math.cos(x * scale)
