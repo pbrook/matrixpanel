@@ -128,7 +128,7 @@ class SwhRecorder:
             self.fftOK = True
 
         
-        out = [0] * self.bands
+        out = numpy.zeros(self.bands)
 
         for i in range(self.bands):
             out[i] = ys[self.bandstart[i]:self.bandend[i]].sum() / self.counts[i]
