@@ -4,7 +4,11 @@ import time
 import math
 import numpy as np
 from matrixscreen import MatrixScreen
+import os, sys
+from PIL import Image
+from webcolors import rgb_to_hex
 
+                        
 def pos_modf(val):
     val = math.modf(val)[0]
     if val < 0:
@@ -30,21 +34,18 @@ def color_plasma(val):
     b = int(b * 256.0 - 0.5)
     return r | (g << 8) | (b << 16)
 
-offset = 0.0
-DT = 1/30
-
 def draw(screen):
-    global offset
+    im = Image.open("m64.BMP")
     sz = 64
-    scale = 0.5 * math.pi * 2.0 / float(sz)
-    for y in range(0, sz):
-        for x in range(0, sz):
-            u = math.cos(x * scale)
-            v = math.cos(y * scale)
-            e = (u + v + 2.0) / 4.0
-            color = color_plasma(offset + e)
-            screen[x, y] = color
-    offset += DT
+    for x in range(0, sz):
+        for y in range(0, sz):
+            pix = im.load()
+            rgb = pix[x,y]
+            r, g, b = rgb
+            #screen[x,y] = 0xaeaeae
+            val = (hex(r) + hex(g)[2:] + hex(b)[2:]).strip()
+            screen[x, y] = r | (b << 8) | (g << 16)
+            #print(val + "-")
 
 def main():
     next_tick = time.time()
