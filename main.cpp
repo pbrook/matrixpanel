@@ -176,13 +176,28 @@ decode_pixels(int fragment, uint8_t *pixels)
   int row;
   int x;
   int n;
+  int delta_base;
+  bool flip;
+  int color2_offset;
 
   partial = fragment % FRAGMENTS_PER_ROW;
   row = fragment / FRAGMENTS_PER_ROW;
+  flip = (partial & 1) == 0;
+  if (flip)
+    row = ROWS - (row + 1);
   base = &write_framebuffer[partial * (FRAGMENT_SIZE / 8) + row * ROW_SIZE];
+  if (flip) {
+      base += (FRAGMENT_SIZE / 8) - 1;
+      color2_offset = -(FRAGMENT_SIZE / 8);
+      src += FRAGMENT_SIZE / 8;
+      delta_base = -1;
+  } else {
+      color2_offset = FRAGMENT_SIZE / 8;
+      delta_base = 1;
+  }
   for (x = 0; x < FRAGMENT_SIZE / 8; x++) {
       color1 = src[0];
-      color2 = src[FRAGMENT_SIZE / 8];
+      color2 = src[color2_offset];
       src++;
       dest = base;
       for (n = 0; n < NUM_SUBFRAMES; n++) {
@@ -193,7 +208,7 @@ decode_pixels(int fragment, uint8_t *pixels)
 	  color1 >>= 1;
 	  color2 >>= 1;
       }
-      base++;
+      base += delta_base;
   }
 }
 
