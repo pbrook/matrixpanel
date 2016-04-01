@@ -48,9 +48,18 @@ DigitalOut sel_b(PTC7);
 DigitalOut sel_c(PTC5);
 
 DigitalOut lat(PTB19);
-DigitalOut oe(PTC1);
+DigitalOut oe(PTC1, 1);
 
 Timer t;
+
+static int extra_food = 1000;
+
+static void
+watchdog_feed()
+{
+  WDOG_REFRESH = 0xa602;
+  WDOG_REFRESH = 0xb480;
+}
 
 static void
 select_row(int n)
@@ -217,7 +226,6 @@ NetRec::run()
 {
   int n;
   uint8_t cmd;
-  uint8_t frame_num;
   uint8_t *dest;
   uint8_t fragment;
 
@@ -234,7 +242,6 @@ NetRec::run()
       if (n < 4)
 	  continue;
       cmd = packet_buffer[0];
-      frame_num = packet_buffer[1];
       switch (cmd) {
       case 0: /* Frame data */
 	  //if (frame_num != current_frame)
@@ -309,9 +316,15 @@ maybe_rearm(void)
       current_row++;
       if (current_row == 8) {
 	  current_row = 0;
+	  if (extra_food > 0) {
+	      watchdog_feed();
+	      extra_food--;
+	  }
+	      
 	  if (read_framebuffer) {
 	      base = read_framebuffer;
 	      read_framebuffer = NULL;
+	      watchdog_feed();
 	  }
 	  ptr = base;
       }
@@ -354,23 +367,27 @@ scan_tick(void)
       }
 #endif
 
+static void
+watchdog_init()
+{
+  __disable_irq();
+  watchdog_feed();
+  WDOG_UNLOCK = 0xc520;
+  WDOG_UNLOCK = 0xd928;
+  
+  WDOG_STCTRLH; // dummy read so at least one memory cycle passes
+  WDOG_TOVALL = 10000;
+  WDOG_TOVALH = 0;
+  WDOG_STCTRLH = WDOG_STCTRLH_WAITEN_MASK | WDOG_STCTRLH_STOPEN_MASK | WDOG_STCTRLH_WDOGEN_MASK;
+  watchdog_feed();
+  __enable_irq();
+}
+
 int main()
 {
   Thread thread(ethernet_thread);
 
-{ int i;
-for (i = 0; i < NUM_SUBFRAMES; i++) {
-  //framebuffer[COLUMNS * NUM_SUBFRAMES] = 0xc1;
-  framebuffer[1 + COLUMNS*0] = 0x01;
-  framebuffer[2 + COLUMNS*1] = 0x01;
-  framebuffer[3 + COLUMNS*2] = 0x01;
-  framebuffer[4 + COLUMNS*3] = 0x01;
-  framebuffer[5 + COLUMNS*4] = 0x01;
-  framebuffer[6 + COLUMNS*5] = 0x01;
-  framebuffer[7 + COLUMNS*6] = 0x01;
-  framebuffer[8 + COLUMNS*7] = 0x01;
-}
-}
+  watchdog_init();
   green_led = 1;
   setup_flexbus();
   setup_dma();
