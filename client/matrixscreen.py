@@ -27,11 +27,17 @@ class MatrixScreen():
                 y = y0 + y1 * self.ROWS * 2
                 header = bytes([3, self._frame_num, n, 0, 0, 0, 0, 0])
                 buf = header + bytes(self.screen[:, y]) + bytes(self.screen[:, y + self.ROWS])
-                self._socket.sendto(buf, dest);
-                self._socket.recv(8)
+                try:
+                    self._socket.sendto(buf, dest);
+                    self._socket.recv(8)
+                except socket.timeout:
+                    pass
                 n += 1
-        self._socket.sendto(bytes([1, self._frame_num, 0, 0]), dest)
-        self._socket.recv(8)
+        try:
+            self._socket.sendto(bytes([1, self._frame_num, 0, 0]), dest)
+            self._socket.recv(8)
+        except socket.timeout:
+            pass
         self._frame_num += 1
         if self._frame_num == 256:
             self._frame_num = 0
