@@ -16,6 +16,7 @@ class MatrixScreen():
     def __init__(self):
         self.screen = np.zeros((self.X, self.Y), dtype = np.uint32)
         self._socket = socket.socket(type=socket.SOCK_DGRAM)
+        self._socket.settimeout(0.1)
         self._frame_num = 0
 
     def send(self):

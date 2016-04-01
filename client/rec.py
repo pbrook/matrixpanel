@@ -64,7 +64,7 @@ class SwhRecorder:
     
     def continuousStart(self):
         """CALL THIS to start running forever."""
-        self.t = threading.Thread(target=self.record)
+        self.t = threading.Thread(target=self.record, daemon=True)
         self.t.start()
         
     def continuousEnd(self):

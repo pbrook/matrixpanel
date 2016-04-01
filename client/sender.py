@@ -51,7 +51,8 @@ def main():
     frames = 0
     m = MatrixScreen()
     try:
-        while True:
+        start = time.time()
+        while (time.time() - start) < 30:
             now = time.time()
             if now > next_tick:
                 print(frames)
